@@ -1,0 +1,162 @@
+---
+title: "msc series 3"
+output: html_document
+date: "2025-05-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{r}
+library(ggplot2)
+library(gridExtra)
+library(forecast)
+
+
+set.seed(123)
+
+generate_series <- function(trend, seasonality, noise_level, n=48) {
+  time <- 1:n
+  level <- 100
+  
+  # Trend component
+  if (trend == "UT") {  # Upward trend
+    trend_component <- 0.5 * time
+  } else if (trend == "DT") {  # Downward trend
+    trend_component <- -0.5 * time
+  } else {  # No trend
+    trend_component <- rep(0, n)
+  }
+  
+  # Sine wave seasonality component
+  if (seasonality == "S") {  # Multiplicative seasonality via sine wave
+    seasonal_component <- sin(2 * pi * time / 4) * 0.1 + 1
+  } else {  # No seasonality
+    seasonal_component <- rep(1, n)
+  }
+  
+  # Noise
+  noise_sd <- ifelse(noise_level == "Low", 4, 8) #low: 2, high: 8 #this is gaussian noise
+  noise <- rnorm(n, mean = 0, sd = noise_sd)
+  
+  # Multiplicative seasonality model
+  y <- (level + trend_component) * seasonal_component + noise
+  #y <- level + trend_component + seasonal_component + noise #additive
+  return(data.frame(time, y))
+}
+
+# Define ETS Model Selection Function
+select_ets_model <- function(trend, seasonality) {
+  if (trend == "NT" & seasonality == "NS") return("ANN")  # Additive error, No Trend, No Seasonality
+  if (trend == "NT" & seasonality == "S") return("MNM")  # Multiplicative error, No Trend, Multiplicative Seasonality
+  if (trend == "UT" & seasonality == "NS") return("AAN")  # Additive error, Additive Trend, No Seasonality
+  if (trend == "UT" & seasonality == "S") return("MAM")  # Multiplicative error, Additive Trend, Multiplicative Seasonality
+  if (trend == "DT" & seasonality == "NS") return("AAN")  # Additive error, Additive Trend, No Seasonality
+  if (trend == "DT" & seasonality == "S") return("MAM")  # Multiplicative error, Additive Trend, Multiplicative Seasonality
+  return("ANN")  # Default fallback
+}
+
+# Forecast Function
+forecast_series <- function(df, model_type, h=4) {
+  ts_data <- ts(df$y, frequency=4)  # Quarterly data
+  model <- ets(ts_data, model=model_type)
+  forecasted <- forecast(model, h=h, level=c(80, 95))
+  mean_vals <- as.numeric(forecasted$mean)
+  lower_80_vals <- as.numeric(forecasted$lower[, 1])
+  upper_80_vals <- as.numeric(forecasted$upper[, 1])
+  lower_95_vals <- as.numeric(forecasted$lower[, 2])
+  upper_95_vals <- as.numeric(forecasted$upper[, 2])
+  
+  return(data.frame(
+    time = max(df$time) + 1:h,
+    y = mean_vals,
+    lower_80 = lower_80_vals,
+    upper_80 = upper_80_vals,
+    lower_95 = lower_95_vals,
+    upper_95 = upper_95_vals
+  ))
+}
+
+# Parameter grid
+trends <- c("NT", "UT", "DT")
+seasonalities <- c("NS", "S")
+noise_levels <- c("Low", "High")
+
+plots <- list()
+plot_num <- 1
+
+all_y_values <- c()
+
+forecast_table <- data.frame()
+series_id <- 1  # <- Add this line
+
+for (noise in noise_levels) {
+  for (trend in trends) {
+    for (seasonality in seasonalities) {
+      for (replication in 1:2) {  # Two samples per setting
+        df <- generate_series(trend, seasonality, noise)
+        model_type <- select_ets_model(trend, seasonality)
+        forecast_df <- forecast_series(df, model_type, h=4)
+        # Add metadata columns
+        forecast_df$Series <- series_id  # Assign current ID
+        forecast_df$trend <- trend
+        forecast_df$seasonality <- seasonality
+        forecast_df$noise <- noise
+        forecast_df$replication <- replication
+        
+
+        # Save this to the combined forecast table
+        forecast_table <- rbind(forecast_table, forecast_df)
+
+        # Combine actual and forecasted values
+        df_combined <- rbind(
+          data.frame(time = df$time, y = df$y, type = "Actual"),
+          data.frame(time = forecast_df$time, y = forecast_df$y, type = "Forecast")
+        )
+        all_y_values <- c(all_y_values, df$y, forecast_df$y, forecast_df$lower_95, forecast_df$upper_95)
+
+
+        p <- ggplot(df, aes(x=time, y=y)) +
+          geom_line() + geom_point(data=forecast_df, aes(x=time, y=y), color="blue", size=2) + 
+          geom_ribbon(data=forecast_df, aes(x=time, ymin=lower_80, ymax=upper_80), fill="blue", alpha=0.2) + 
+          geom_ribbon(data=forecast_df, aes(x=time, ymin=lower_95, ymax=upper_95), fill="red", alpha=0.2) + 
+          ggtitle(paste(noise, "Noise |", trend, "|", ifelse(seasonality == "S", "Mul. Seas.", "No Seas."))) +
+          theme_minimal() +
+          theme(plot.title = element_text(size=8))
+        plots[[plot_num]] <- p
+        plot_num <- plot_num + 1
+        
+        series_id <- series_id + 1
+      }
+    }
+  }
+}
+
+grid.arrange(grobs = plots, ncol=4)
+write.csv(forecast_table, "forecast_table.csv", row.names = FALSE)
+```
+
+```{r}
+# Collect actual series (48 points each, total of 24 series)
+series_matrix <- data.frame(time = 1:48)
+series_index <- 1
+
+# Re-run same loops just to collect actual 48-point series
+for (noise in noise_levels) {
+  for (trend in trends) {
+    for (seasonality in seasonalities) {
+      for (replication in 1:2) {
+        df <- generate_series(trend, seasonality, noise, n = 48)
+        series_matrix[[paste0("series_", series_index)]] <- df$y
+        series_index <- series_index + 1
+      }
+    }
+  }
+}
+
+# Write to CSV
+write.csv(series_matrix, "simulated_series_new.csv", row.names = FALSE)
+```
+

@@ -1,0 +1,342 @@
+---
+title: "msc"
+output: html_document
+date: "2025-03-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+library(pwr)
+pwr.anova.test(k = 5, f = 0.25, sig.level = 0.05, power = 0.8)
+```
+
+```{r}
+# Load required libraries
+library(lme4)
+library(dplyr)
+
+set.seed(123)  # For reproducibility
+
+# Define experiment structure
+n_participants <- 200  # Initial number of participants
+n_groups <- 5  # Between-subject factor (5 experimental conditions)
+
+trend_levels <- c(-0.5, 0, 0.5)  # 3 trend values
+seasonality_levels <- c("Yes", "No")  # 2 levels
+noise_levels <- c("High", "Low")  # 2 levels
+
+n_repeats <- length(trend_levels) * length(seasonality_levels) * length(noise_levels) * 2  # 2 series per condition
+
+# Expand grid to create full within-subject design
+within_conditions <- expand.grid(
+  trend = trend_levels,
+  seasonality = seasonality_levels,
+  noise = noise_levels,
+  series_id = 1:2  # Two time series per condition
+)
+# Generate participant data
+participants <- data.frame(
+  participant = 1:n_participants,
+  group = factor(sample(1:n_groups, n_participants, replace = TRUE),
+                 labels = c("Control", "80%", "80% + Point", "95%", "95% + Point"))
+)
+
+within_conditions <- expand.grid(
+  trend = c("Trend", "No Trend"),
+  seasonality = c("Yes", "No"),
+  noise = c("Low Noise", "High Noise")
+)
+
+# Create dataset for all participants with repeated measures
+data_list <- list()
+
+for (i in 1:n_participants) {
+  
+  # Get the group for the current participant
+  current_group <- participants$group[i]
+  
+  # Assign conditions for each participant (within-subject factors)
+  temp_data <- within_conditions
+  temp_data$participant <- participants$participant[i]
+  temp_data$group <- current_group
+  # Simulate the response variable based on group and within-subject conditions
+  temp_data$response <- rnorm(nrow(temp_data), 
+                              mean = ifelse(temp_data$group == "Control", 0, as.numeric(temp_data$trend == "Trend") * 0.5),
+                              sd = ifelse(temp_data$noise == "High Noise", 1.5, 1))  # Higher variability in high noise
+  
+  # Store the simulated data for this participant
+  data_list[[i]] <- temp_data
+}
+
+
+# Combine all data into a single dataframe
+data <- do.call(rbind, data_list)
+
+# Convert categorical variables to factors
+data$trend <- as.factor(data$trend)
+data$seasonality <- as.factor(data$seasonality)
+data$noise <- as.factor(data$noise)
+
+# Check data structure
+str(data)
+head(data)
+# Fit mixed model
+model <- lmer(response ~ group + trend + seasonality + noise + (1 | participant), data = data)
+
+# Check model summary
+summary(model)
+
+# Run power simulations for different sample sizes
+# Extend the model to simulate increasing sample sizes
+model_extended_200 <- extend(model, along = "participant", n = 200)
+
+# Run power simulation for the fixed effect of 'group'
+power_200 <- powerSim(model_extended_200, fixed("group", method = "anova"), nsim = 50)
+
+# Print the results for each sample size
+print(power_200)
+
+#not working:
+power_curve <- powerCurve(model, along = "participant", breaks = seq(50, 300, by = 25), nsim = 200)
+plot(power_curve)
+```
+
+```{r}
+library(forecast)
+
+y <- AirPassengers
+plot(y)
+# for data with no trend and no seasonality
+ANN <- forecast(ets(y, model="ANN"), h=12, level=95)
+plot(ANN)
+# for data with trend and no seasonality
+AAN <- forecast(ets(y, model="AAN"), h=12, level=95)
+plot(AAN)
+
+# for data with no trend and seasonality
+forecast(ets(y, model="MNM"), h=12, level=95)
+# for data with with trend and seasonality
+forecast(ets(y, model="MAM"), h=12, level=95)
+```
+
+```{r}
+set.seed(1)
+n <- 48  # Number of data points
+time_series <- ts(rnorm(n), frequency = 4)
+y_shifted <- ts(time_series - min(time_series) + 1, frequency = 4)  # Shift values so minimum is at least 1
+```
+
+Somehow stupid:
+```{r}
+#fit_ets_ANN <- ets(y_shifted, model = "ANN")  # No trend, no seasonality (Additive Error, No Trend, No Seasonality)
+#forecast_ANN <- forecast(fit_ets_ANN, h = 4, level = 95)
+#plot(forecast_ANN, main = "ETS Model: No Trend and No Seasonality")
+
+#fit_ets_AAN <- ets(y_shifted, model = "AAN")  # Additive Error, Additive Trend, No Seasonality
+#forecast_AAN <- forecast(fit_ets_AAN, h = 4, level = 95)
+#plot(forecast_AAN, main = "ETS Model: Trend but No Seasonality")
+
+#fit_ets_MNM <- ets(y_shifted, model = "MNM")  # Multiplicative Error, No Trend, Multiplicative Seasonality
+#forecast_MNM <- forecast(fit_ets_MNM, h = 4, level = 95)
+#plot(forecast_MNM, main = "ETS Model: No Trend with Seasonality (Adjusted Data)")
+
+#fit_ets_MAM <- ets(y_shifted, model = "MAM")  # Multiplicative Error, Additive Trend, Multiplicative Seasonality
+#forecast_MAM <- forecast(fit_ets_MAM, h = 4, level = 95)
+#plot(forecast_MAM, main = "ETS Model: Trend and Seasonality")
+```
+```{r}
+#set.seed(2)
+#n <- 48  # Number of data points
+#time_series2 <- ts(rnorm(n), frequency = 4)
+#y_shifted2 <- ts(time_series2 - min(time_series2) + 1, frequency = 4)  # Shift values so minimum is at least 1
+#fit_ets_ANN2 <- ets(y_shifted2, model = "ANN")  # No trend, no seasonality (Additive Error, No Trend, No Seasonality)
+#forecast_ANN2 <- forecast(fit_ets_ANN2, h = 4, level = 95)
+#plot(forecast_ANN2, main = "ETS Model: No Trend and No Seasonality")
+
+#fit_ets_AAN2 <- ets(y_shifted2, model = "AAN")  # Additive Error, Additive Trend, No Seasonality
+#forecast_AAN2 <- forecast(fit_ets_AAN2, h = 4, level = 95)
+#plot(forecast_AAN2, main = "ETS Model: Trend but No Seasonality")
+
+#fit_ets_MNM2 <- ets(y_shifted2, model = "MNM")  # Multiplicative Error, No Trend, Multiplicative Seasonality
+#forecast_MNM2 <- forecast(fit_ets_MNM2, h = 4, level = 95)
+#plot(forecast_MNM2, main = "ETS Model: No Trend with Seasonality (Adjusted Data)")
+
+#fit_ets_MAM2 <- ets(y_shifted2, model = "MAM")  # Multiplicative Error, Additive Trend, Multiplicative Seasonality
+#forecast_MAM2 <- forecast(fit_ets_MAM2, h = 4, level = 95)
+#plot(forecast_MAM2, main = "ETS Model: Trend and Seasonality")
+```
+
+```{r}
+fit_ets <- ets(y_shifted)
+summary(fit_ets)
+
+# Simulate 2 time series using the fitted ETS model
+simulated_series <- replicate(2, simulate(fit_ets, nsim = n), simplify = FALSE)
+```
+
+```{r}
+high_noise_series <- lapply(simulated_series, function(x) ts(x + rnorm(n, mean = 0, sd = 2), frequency = 4))
+low_noise_series <- lapply(simulated_series, function(x) ts(x + rnorm(n, mean = 0, sd = 0.5), frequency = 4))
+
+#par(mfrow = c(3, 2))  # Arrange the plots in a 3x2 grid
+#for(i in 1:2) {
+#  plot(simulated_series[[i]], main = paste("Simulated Series", i), col = "blue")
+#}
+
+par(mfrow = c(3, 2))  # Arrange the plots in a 2x2 grid
+for (i in 1:2) {
+  plot(simulated_series[[i]], main = paste("Original Series", i), col = "blue", ylim = range(c(high_noise_series[[i]], low_noise_series[[i]])))
+
+  plot(high_noise_series[[i]], main = paste("High Noise Series", i), col = "red", ylim = range(high_noise_series[[i]]))
+
+  plot(low_noise_series[[i]], main = paste("Low Noise Series", i), col = "green", ylim = range(low_noise_series[[i]]))
+}
+```
+
+```{r}
+#1,5 are quite flat
+#others need to adjust scale
+fit_ets_ANN <- ets(simulated_series[[1]], model = "ANN")  # No trend, no seasonality (Additive Error, No Trend, No Seasonality)
+forecast_ANN <- forecast(fit_ets_ANN, h = 4, level = 95)
+plot(forecast_ANN, main = "ETS Model: No Trend and No Seasonality")
+
+fit_ets_AAN <- ets(simulated_series[[1]], model = "AAN")  # Additive Error, Additive Trend, No Seasonality
+forecast_AAN <- forecast(fit_ets_AAN, h = 4, level = 95)
+plot(forecast_AAN, main = "ETS Model: Trend but No Seasonality")
+
+fit_ets_MNM <- ets(simulated_series[[1]], model = "MNM")  # Multiplicative Error, No Trend, Multiplicative Seasonality
+forecast_MNM <- forecast(fit_ets_MNM, h = 4, level = 95)
+plot(forecast_MNM, main = "ETS Model: No Trend with Seasonality (Adjusted Data)")
+
+fit_ets_MAM <- ets(simulated_series[[1]], model = "MAM")  # Multiplicative Error, Additive Trend, Multiplicative Seasonality
+forecast_MAM <- forecast(fit_ets_MAM, h = 4, level = 95)
+plot(forecast_MAM, main = "ETS Model: Trend and Seasonality")
+```
+
+```{r}
+fit_ets_ANN <- ets(simulated_series[[2]], model = "ANN")  # No trend, no seasonality (Additive Error, No Trend, No Seasonality)
+forecast_ANN <- forecast(fit_ets_ANN, h = 4, level = 95)
+plot(forecast_ANN, main = "ETS Model: No Trend and No Seasonality")
+
+fit_ets_AAN <- ets(simulated_series[[2]], model = "AAN")  # Additive Error, Additive Trend, No Seasonality
+forecast_AAN <- forecast(fit_ets_AAN, h = 4, level = 95)
+plot(forecast_AAN, main = "ETS Model: Trend but No Seasonality")
+
+fit_ets_MNM <- ets(simulated_series[[2]], model = "MNM")  # Multiplicative Error, No Trend, Multiplicative Seasonality
+forecast_MNM <- forecast(fit_ets_MNM, h = 4, level = 95)
+plot(forecast_MNM, main = "ETS Model: No Trend with Seasonality")
+
+fit_ets_MAM <- ets(simulated_series[[2]], model = "MAM")  # Multiplicative Error, Additive Trend, Multiplicative Seasonality
+forecast_MAM <- forecast(fit_ets_MAM, h = 4, level = 95)
+plot(forecast_MAM, main = "ETS Model: Trend and Seasonality")
+```
+
+```{r}
+# Combine all 8 time series into one dataframe
+simulated_df <- data.frame(Time = 1:n)
+for (i in 1:2) {
+  simulated_df[[paste0("Series", (i-1)*4+1)]] <- forecast(ets(simulated_series[[i]], model = "ANN"), h=4)$mean
+  simulated_df[[paste0("Series", (i-1)*4+2)]] <- forecast(ets(simulated_series[[i]], model = "AAN"), h=4)$mean
+  simulated_df[[paste0("Series", (i-1)*4+3)]] <- forecast(ets(simulated_series[[i]], model = "MNM"), h=4)$mean
+  simulated_df[[paste0("Series", (i-1)*4+4)]] <- forecast(ets(simulated_series[[i]], model = "MAM"), h=4)$mean
+}
+
+# Save both historical and forecast data
+write.csv(simulated_df, "simulated_series.csv", row.names = FALSE)
+```
+
+```{r}
+# **High-Noise Series 1**
+fit_ets_ANN_H1 <- ets(high_noise_series[[1]], model = "ANN")  
+forecast_ANN_H1 <- forecast(fit_ets_ANN_H1, h = 4, level = 95)
+plot(forecast_ANN_H1, main = "High Noise 1 - No Trend, No Seasonality")
+
+fit_ets_AAN_H1 <- ets(high_noise_series[[1]], model = "AAN")  
+forecast_AAN_H1 <- forecast(fit_ets_AAN_H1, h = 4, level = 95)
+plot(forecast_AAN_H1, main = "High Noise 1 - Trend, No Seasonality")
+
+fit_ets_MNM_H1 <- ets(high_noise_series[[1]], model = "MNM")  
+forecast_MNM_H1 <- forecast(fit_ets_MNM_H1, h = 4, level = 95)
+plot(forecast_MNM_H1, main = "High Noise 1 - No Trend, Seasonality")
+
+fit_ets_MAM_H1 <- ets(high_noise_series[[1]], model = "MAM")  
+forecast_MAM_H1 <- forecast(fit_ets_MAM_H1, h = 4, level = 95)
+plot(forecast_MAM_H1, main = "High Noise 1 - Trend & Seasonality")
+
+# **High-Noise Series 2**
+fit_ets_ANN_H2 <- ets(high_noise_series[[2]], model = "ANN")  
+forecast_ANN_H2 <- forecast(fit_ets_ANN_H2, h = 4, level = 95)
+plot(forecast_ANN_H2, main = "High Noise 2 - No Trend, No Seasonality")
+
+fit_ets_AAN_H2 <- ets(high_noise_series[[2]], model = "AAN")  
+forecast_AAN_H2 <- forecast(fit_ets_AAN_H2, h = 4, level = 95)
+plot(forecast_AAN_H2, main = "High Noise 2 - Trend, No Seasonality")
+
+fit_ets_MNM_H2 <- ets(high_noise_series[[2]], model = "MNM")  
+forecast_MNM_H2 <- forecast(fit_ets_MNM_H2, h = 4, level = 95)
+plot(forecast_MNM_H2, main = "High Noise 2 - No Trend, Seasonality")
+
+fit_ets_MAM_H2 <- ets(high_noise_series[[2]], model = "MAM")  
+forecast_MAM_H2 <- forecast(fit_ets_MAM_H2, h = 4, level = 95)
+plot(forecast_MAM_H2, main = "High Noise 2 - Trend & Seasonality")
+
+# **Low-Noise Series 1**
+fit_ets_ANN_L1 <- ets(low_noise_series[[1]], model = "ANN")  
+forecast_ANN_L1 <- forecast(fit_ets_ANN_L1, h = 4, level = 95)
+plot(forecast_ANN_L1, main = "Low Noise 1 - No Trend, No Seasonality")
+
+fit_ets_AAN_L1 <- ets(low_noise_series[[1]], model = "AAN")  
+forecast_AAN_L1 <- forecast(fit_ets_AAN_L1, h = 4, level = 95)
+plot(forecast_AAN_L1, main = "Low Noise 1 - Trend, No Seasonality")
+
+fit_ets_MNM_L1 <- ets(low_noise_series[[1]], model = "MNM")  
+forecast_MNM_L1 <- forecast(fit_ets_MNM_L1, h = 4, level = 95)
+plot(forecast_MNM_L1, main = "Low Noise 1 - No Trend, Seasonality")
+
+fit_ets_MAM_L1 <- ets(low_noise_series[[1]], model = "MAM")  
+forecast_MAM_L1 <- forecast(fit_ets_MAM_L1, h = 4, level = 95)
+plot(forecast_MAM_L1, main = "Low Noise 1 - Trend & Seasonality")
+
+# **Low-Noise Series 2**
+fit_ets_ANN_L2 <- ets(low_noise_series[[2]], model = "ANN")  
+forecast_ANN_L2 <- forecast(fit_ets_ANN_L2, h = 4, level = 95)
+plot(forecast_ANN_L2, main = "Low Noise 2 - No Trend, No Seasonality")
+
+fit_ets_AAN_L2 <- ets(low_noise_series[[2]], model = "AAN")  
+forecast_AAN_L2 <- forecast(fit_ets_AAN_L2, h = 4, level = 95)
+plot(forecast_AAN_L2, main = "Low Noise 2 - Trend, No Seasonality")
+
+fit_ets_MNM_L2 <- ets(low_noise_series[[2]], model = "MNM")  
+forecast_MNM_L2 <- forecast(fit_ets_MNM_L2, h = 4, level = 95)
+plot(forecast_MNM_L2, main = "Low Noise 2 - No Trend, Seasonality")
+
+fit_ets_MAM_L2 <- ets(low_noise_series[[2]], model = "MAM")  
+forecast_MAM_L2 <- forecast(fit_ets_MAM_L2, h = 4, level = 95)
+plot(forecast_MAM_L2, main = "Low Noise 2 - Trend & Seasonality")
+```
+
+```{r}
+simulated_df2 <- data.frame(Time = 1:n)
+for (i in 1:2) {
+  simulated_df2[[paste0("Series", (i-1)*8+1)]] <- forecast(ets(high_noise_series[[i]], model = "ANN"), h=4)$mean
+  simulated_df2[[paste0("Series", (i-1)*8+2)]] <- forecast(ets(high_noise_series[[i]], model = "AAN"), h=4)$mean
+  simulated_df2[[paste0("Series", (i-1)*8+3)]] <- forecast(ets(high_noise_series[[i]], model = "MNM"), h=4)$mean
+  simulated_df2[[paste0("Series", (i-1)*8+4)]] <- forecast(ets(high_noise_series[[i]], model = "MAM"), h=4)$mean
+  
+  simulated_df2[[paste0("Series", (i-1)*8+5)]] <- forecast(ets(low_noise_series[[i]], model = "ANN"), h=4)$mean
+  simulated_df2[[paste0("Series", (i-1)*8+6)]] <- forecast(ets(low_noise_series[[i]], model = "AAN"), h=4)$mean
+  simulated_df2[[paste0("Series", (i-1)*8+7)]] <- forecast(ets(low_noise_series[[i]], model = "MNM"), h=4)$mean
+  simulated_df2[[paste0("Series", (i-1)*8+8)]] <- forecast(ets(low_noise_series[[i]], model = "MAM"), h=4)$mean
+  
+}
+
+# Save both historical and forecast data
+write.csv(simulated_df2, "simulated_series_2.csv", row.names = FALSE)
+```
+
+

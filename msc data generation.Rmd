@@ -1,0 +1,740 @@
+---
+title: "msc data generation"
+output: html_document
+date: "2025-03-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+set.seed(123)
+
+generate_series <- function(trend, seasonality, noise_level, n=52) {
+  time <- 1:n
+  level <- 100
+  
+  # Trend component
+  if (trend == "UT") {  # Upward trend
+    trend_component <- 0.5 * time
+  } else if (trend == "DT") {  # Downward trend
+    trend_component <- -0.5 * time
+  } else {  # No trend
+    trend_component <- rep(0, n)
+  }
+  
+  # Sine wave seasonality component
+  if (seasonality == "S") {  # Multiplicative seasonality via sine wave
+    seasonal_component <- sin(2 * pi * time / 4) * 0.2 + 1
+  } else {  # No seasonality
+    seasonal_component <- rep(1, n)
+  }
+  
+  # Noise
+  noise_sd <- ifelse(noise_level == "Low", 2, 8) #low: 2, high: 8 #this is gaussian noise
+  noise <- rnorm(n, mean = 0, sd = noise_sd)
+  
+  # Multiplicative seasonality model
+  y <- (level + trend_component) * seasonal_component + noise
+  #y <- level + trend_component + seasonal_component + noise #additive
+  return(data.frame(time, y))
+}
+```
+```{r}
+# Parameter grid
+trends <- c("NT", "UT", "DT")
+seasonalities <- c("NS", "S")
+noise_levels <- c("Low", "High")
+
+plots <- list()
+plot_num <- 1
+
+for (noise in noise_levels) {
+  for (trend in trends) {
+    for (seasonality in seasonalities) {
+      for (replication in 1:2) {  # Two samples per setting
+        df <- generate_series(trend, seasonality, noise)
+        p <- ggplot(df, aes(x=time, y=y)) +
+          geom_line() +
+          ggtitle(paste(noise, "Noise |", trend, "|", ifelse(seasonality == "S", "Mul. Seas.", "No Seas."))) +
+          theme_minimal() +
+          theme(plot.title = element_text(size=8))
+        plots[[plot_num]] <- p
+        plot_num <- plot_num + 1
+      }
+    }
+  }
+}
+
+# Plot 24 charts in grid (6 rows x 4 columns)
+grid.arrange(grobs = plots, ncol=4)
+```
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+set.seed(123)
+
+generate_series <- function(trend, seasonality, noise_level, n=52) {
+  time <- 1:n
+  level <- 100
+  
+  # Trend component
+  if (trend == "UT") {  # Upward trend
+    trend_component <- 0.5 * time
+  } else if (trend == "DT") {  # Downward trend
+    trend_component <- -0.5 * time
+  } else {  # No trend
+    trend_component <- rep(0, n)
+  }
+  
+  # Sine wave seasonality component
+  if (seasonality == "S") {  # Multiplicative seasonality via sine wave
+    seasonal_component <- sin(2 * pi * time / 4) * 0.2 + 1
+  } else {  # No seasonality
+    seasonal_component <- rep(1, n)
+  }
+  
+  # Noise
+  noise_sd <- ifelse(noise_level == "Low", 2, 8)
+  noise <- rnorm(n, mean = 0, sd = noise_sd)
+  
+  # Multiplicative seasonality model
+  y <- (level + trend_component) * seasonal_component + noise
+  
+  return(data.frame(time, y))
+}
+
+# Save series into a list
+series_list <- list()
+plot_list <- list()
+index <- 1
+
+for (noise in c("Low", "High")) {
+  for (trend in c("NT", "UT", "DT")) {
+    for (seasonality in c("NS", "S")) {
+      for (replication in 1:2) {
+        df <- generate_series(trend, seasonality, noise)
+        series_list[[index]] <- df$y # only save y values
+        # Optional: plotting
+        plot_list[[index]] <- ggplot(df, aes(x=time, y=y)) + 
+          geom_line() + 
+          ggtitle(paste(noise, "Noise |", trend, "|", ifelse(seasonality == "S", "Mul. Seas.", "No Seas."))) +
+          theme_minimal() +
+          theme(plot.title = element_text(size=8))
+        index <- index + 1
+      }
+    }
+  }
+}
+
+# Visualize the 24 series
+grid.arrange(grobs = plot_list, ncol=4)
+```
+
+
+```{r}
+horizon <- 4  # You mentioned forecasting next 4 periods
+confidence_levels <- c(80, 95)
+
+# Create a list to store forecasts
+forecasts_list <- list()
+
+for (i in 1:24) {
+  ts_data <- ts(series_list[[i]], frequency = 4) 
+  
+  # Fit ETS model
+  fit <- ets(ts_data)
+  
+  # Forecast with both 80% and 95% confidence intervals
+  fc <- forecast(fit, h = horizon, level = confidence_levels)
+  
+  forecasts_list[[i]] <- fc
+}
+
+```
+```{r}
+forecast_df <- data.frame()
+
+for (i in 1:24) {
+  fc <- forecasts_list[[i]]
+  df_temp <- data.frame(
+    Series = i,
+    Time = (length(series_list[[i]]) + 1):(length(series_list[[i]]) + horizon),
+    Mean = as.numeric(fc$mean),
+    Lower_80 = as.numeric(fc$lower[, 1]),
+    Upper_80 = as.numeric(fc$upper[, 1]),
+    Lower_95 = as.numeric(fc$lower[, 2]),
+    Upper_95 = as.numeric(fc$upper[, 2])
+  )
+  
+  forecast_df <- rbind(forecast_df, df_temp)
+}
+
+# Save to CSV for use in Python
+write.csv(forecast_df, "forecasts_24_series.csv", row.names = FALSE)
+
+```
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+library(forecast)
+library(dplyr)
+
+set.seed(123)
+
+generate_series <- function(trend, seasonality, noise_level, n=52) {
+  time <- 1:n
+  level <- 100
+  
+  if (trend == "UT") { 
+    trend_component <- 0.5 * time
+  } else if (trend == "DT") { 
+    trend_component <- -0.5 * time
+  } else {  
+    trend_component <- rep(0, n)
+  }
+  
+  if (seasonality == "S") {  
+    seasonal_component <- sin(2 * pi * time / 4) * 0.2 + 1
+  } else {  
+    seasonal_component <- rep(1, n)
+  }
+  
+  noise_sd <- ifelse(noise_level == "Low", 2, 8)
+  noise <- rnorm(n, mean = 0, sd = noise_sd)
+  
+  y <- (level + trend_component) * seasonal_component + noise
+  return(data.frame(time, y))
+}
+
+# Your grid
+trends <- c("NT", "UT", "DT")
+seasonalities <- c("NS", "S")
+noise_levels <- c("Low", "High")
+
+plots <- list()
+plot_num <- 1
+series_list <- list()
+forecast_list <- list()
+series_id <- 1
+
+for (noise in noise_levels) {
+  for (trend in trends) {
+    for (seasonality in seasonalities) {
+      for (replication in 1:2) {  # Two samples per setting
+        
+        df <- generate_series(trend, seasonality, noise, n = 52)
+        
+        # Save full series
+        df$series_id <- series_id
+        df$trend <- trend
+        df$seasonality <- seasonality
+        df$noise <- noise
+        series_list[[series_id]] <- df
+        
+        # Forecast only t=49:52
+        train_data <- ts(df$y[1:48], frequency = 4)
+        fit <- ets(train_data)
+        fc <- forecast(fit, h = 4)
+        
+        fc_df <- data.frame(
+          time = 49:52,
+          point_forecast = as.numeric(fc$mean),
+          series_id = series_id,
+          trend = trend,
+          seasonality = seasonality,
+          noise = noise
+        )
+        forecast_list[[series_id]] <- fc_df
+        
+        # Your plotting stays untouched
+        p <- ggplot(df, aes(x=time, y=y)) +
+          geom_line() +
+          ggtitle(paste(noise, "Noise |", trend, "|", ifelse(seasonality == "S", "Mul. Seas.", "No Seas."))) +
+          theme_minimal() +
+          theme(plot.title = element_text(size=8))
+        plots[[plot_num]] <- p
+        plot_num <- plot_num + 1
+        
+        series_id <- series_id + 1
+      }
+    }
+  }
+}
+
+# Plot your grid
+grid.arrange(grobs = plots, ncol=4)
+
+# Export to CSV
+all_series_df <- bind_rows(series_list)
+all_forecasts_df <- bind_rows(forecast_list)
+
+write.csv(all_series_df, "my_all_series.csv", row.names = FALSE)
+write.csv(all_forecasts_df, "my_all_forecasts.csv", row.names = FALSE)
+
+```
+
+later copied from 2:
+not use this:
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+set.seed(123)
+
+# Function to generate time series
+generate_series <- function(trend, seasonality, noise_level, n=48) {
+  time <- 1:n
+  level <- 100
+  
+  # Trend component
+  if (trend == "UT") {  # Upward trend
+    trend_component <- 1 * time
+  } else if (trend == "DT") {  # Downward trend
+    trend_component <- -1 * time
+  } else {  # No trend
+    trend_component <- rep(0, n)
+  }
+  
+  # Sine wave seasonality component
+  if (seasonality == "S") {  # Multiplicative seasonality via sine wave
+    seasonal_component <- sin(2 * pi * time / 4) * 0.2 + 1
+  } else {  # No seasonality
+    seasonal_component <- rep(1, n)
+  }
+  
+  # Noise levels
+  noise_sd <- ifelse(noise_level == "Low", 5, 15)
+  noise <- rnorm(n, mean = 0, sd = noise_sd)
+  
+  # Multiplicative seasonality model
+  y <- (level + trend_component) * seasonal_component + noise
+  return(data.frame(time, y, noise))
+}
+
+# Calculate confidence intervals using a for-loop
+calculate_pointwise_confidence_intervals <- function(y, window_size=5, level=0.95) {
+  n <- length(y)
+  z_value <- ifelse(level == 0.95, 1.96, 1.28)  # z-scores for 95% and 80% confidence
+  
+  lower_bound <- numeric(n)
+  upper_bound <- numeric(n)
+  
+  for (i in 1:n) {
+    # Define a rolling window centered at point i
+    start_index <- max(1, i - floor(window_size / 2))
+    end_index <- min(n, i + floor(window_size / 2))
+    
+    # Extract the local window
+    window <- y[start_index:end_index]
+    
+    # Compute standard deviation and margin of error
+    std_dev <- sd(window, na.rm = TRUE)
+    margin_of_error <- z_value * std_dev / sqrt(length(window))
+    
+    # Compute the confidence interval bounds
+    lower_bound[i] <- y[i] - margin_of_error
+    upper_bound[i] <- y[i] + margin_of_error
+  }
+  
+  return(data.frame(upper_bound, lower_bound))
+}
+
+# Parameter grid
+trends <- c("NT", "UT", "DT")
+seasonalities <- c("NS", "S")
+noise_levels <- c("Low", "High")
+
+plots <- list()
+plot_num <- 1
+all_y_values <- c()
+
+for (noise in noise_levels) {
+  for (trend in trends) {
+    for (seasonality in seasonalities) {
+      for (replication in 1:2) {
+        df <- generate_series(trend, seasonality, noise)
+        all_y_values <- c(all_y_values, df$y)  # Store all y-values
+        
+        # Calculate rolling confidence intervals (80% and 95%)
+        conf_80 <- calculate_pointwise_confidence_intervals(df$y, window_size=5, level=0.80)
+        conf_95 <- calculate_pointwise_confidence_intervals(df$y, window_size=5, level=0.95)
+        
+        # Add confidence intervals to the data frame
+        df$lower_80 <- conf_80$lower_bound
+        df$upper_80 <- conf_80$upper_bound
+        df$lower_95 <- conf_95$lower_bound
+        df$upper_95 <- conf_95$upper_bound
+        
+        # Create plot with error bars for confidence intervals
+        p <- ggplot(df, aes(x=time, y=y)) +
+          geom_line(color="black") + 
+          geom_point(color="black", size=1) +  # Show data points
+          geom_errorbar(aes(ymin=lower_80, ymax=upper_80), width=0.2, color="blue", alpha=0.5) +  # 80% CI
+          geom_errorbar(aes(ymin=lower_95, ymax=upper_95), width=0.2, color="red", alpha=0.5) +  # 95% CI
+          ggtitle(paste(noise, "Noise |", trend, "|", ifelse(seasonality == "S", "Mul. Seas.", "No Seas."))) + 
+          theme_minimal() + 
+          theme(plot.title = element_text(size=8)) +
+          ylim(min(all_y_values), max(all_y_values))  # Use global y-axis limits
+        
+        plots[[plot_num]] <- p
+        plot_num <- plot_num + 1
+      }
+    }
+  }
+}
+
+# Arrange all plots in a grid
+grid.arrange(grobs = plots, ncol=4)
+
+```
+
+not use this:
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+set.seed(123)
+
+# Function to generate time series
+generate_series <- function(trend, seasonality, noise_level, n=48) {
+  time <- 1:n
+  level <- 100
+  
+  # Trend component
+  if (trend == "UT") {  # Upward trend
+    trend_component <- 1 * time
+  } else if (trend == "DT") {  # Downward trend
+    trend_component <- -1 * time
+  } else {  # No trend
+    trend_component <- rep(0, n)
+  }
+  
+  # Sine wave seasonality component
+  if (seasonality == "S") {  # Multiplicative seasonality via sine wave
+    seasonal_component <- sin(2 * pi * time / 4) * 0.2 + 1
+  } else {  # No seasonality
+    seasonal_component <- rep(1, n)
+  }
+  
+  # Noise levels
+  noise_sd <- ifelse(noise_level == "Low", 5, 15)
+  noise <- rnorm(n, mean = 0, sd = noise_sd)
+  
+  # Multiplicative seasonality model
+  y <- (level + trend_component) * seasonal_component + noise
+  return(data.frame(time, y, noise))
+}
+
+# Function to calculate rolling confidence intervals using a for-loop
+calculate_confidence_intervals <- function(y, window_size=5, level=0.95) {
+  n <- length(y)
+  z_value <- ifelse(level == 0.95, 1.96, 1.28)  # z-scores for 95% and 80% confidence
+  
+  lower_bound <- numeric(n)
+  upper_bound <- numeric(n)
+  
+  for (i in 1:n) {
+    # Define rolling window centered at point i
+    start_index <- max(1, i - floor(window_size / 2))
+    end_index <- min(n, i + floor(window_size / 2))
+    
+    # Extract the local window
+    window <- y[start_index:end_index]
+    
+    # Compute standard deviation and margin of error
+    std_dev <- sd(window, na.rm = TRUE)
+    margin_of_error <- z_value * std_dev / sqrt(length(window))
+    
+    # Compute the confidence interval bounds
+    lower_bound[i] <- y[i] - margin_of_error
+    upper_bound[i] <- y[i] + margin_of_error
+  }
+  
+  return(data.frame(upper_bound, lower_bound))
+}
+
+# Parameter grid
+trends <- c("NT", "UT", "DT")
+seasonalities <- c("NS", "S")
+noise_levels <- c("Low", "High")
+
+plots <- list()
+plot_num <- 1
+all_y_values <- c()
+
+for (noise in noise_levels) {
+  for (trend in trends) {
+    for (seasonality in seasonalities) {
+      for (replication in 1:2) {
+        df <- generate_series(trend, seasonality, noise)
+        all_y_values <- c(all_y_values, df$y)  # Store all y-values
+        
+        # Calculate rolling confidence intervals (80% and 95%)
+        conf_80 <- calculate_confidence_intervals(df$y, window_size=5, level=0.80)
+        conf_95 <- calculate_confidence_intervals(df$y, window_size=5, level=0.95)
+        
+        # Add confidence intervals to the data frame
+        df$lower_80 <- conf_80$lower_bound
+        df$upper_80 <- conf_80$upper_bound
+        df$lower_95 <- conf_95$lower_bound
+        df$upper_95 <- conf_95$upper_bound
+        
+        # Create plot with shaded confidence intervals and error bars
+        p <- ggplot(df, aes(x=time, y=y)) +
+          geom_ribbon(aes(ymin=lower_95, ymax=upper_95), fill="red", alpha=0.2) +  # 95% CI (wider)
+          geom_ribbon(aes(ymin=lower_80, ymax=upper_80), fill="blue", alpha=0.3) +  # 80% CI (narrower)
+          geom_line(color="black") + 
+          geom_point(color="black", size=1) +  # Show data points
+          geom_errorbar(aes(ymin=lower_80, ymax=upper_80), width=0.2, color="blue", alpha=0.5) +  # 80% CI Error bars
+          geom_errorbar(aes(ymin=lower_95, ymax=upper_95), width=0.2, color="red", alpha=0.5) +  # 95% CI Error bars
+          ggtitle(paste(noise, "Noise |", trend, "|", ifelse(seasonality == "S", "Mul. Seas.", "No Seas."))) + 
+          theme_minimal() + 
+          theme(plot.title = element_text(size=8)) +
+          ylim(min(all_y_values), max(all_y_values))  # Use global y-axis limits
+        
+        plots[[plot_num]] <- p
+        plot_num <- plot_num + 1
+      }
+    }
+  }
+}
+
+# Arrange all plots in a grid
+grid.arrange(grobs = plots, ncol=4)
+```
+
+not use this:
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+set.seed(123)
+
+# Function to generate time series
+generate_series <- function(trend, seasonality, noise_level, n=48) {
+  time <- 1:n
+  level <- 100
+  
+  # Trend component
+  if (trend == "UT") {  # Upward trend
+    trend_component <- 1.5 * time
+  } else if (trend == "DT") {  # Downward trend
+    trend_component <- -1.5 * time
+  } else {  # No trend
+    trend_component <- rep(0, n)
+  }
+  
+  # Sine wave seasonality component
+  if (seasonality == "S") {  # Multiplicative seasonality via sine wave
+    seasonal_component <- sin(2 * pi * time / 4) * 0.2 + 1
+  } else {  # No seasonality
+    seasonal_component <- rep(1, n)
+  }
+  
+  # Noise levels
+  noise_sd <- ifelse(noise_level == "Low", 6, 15)
+  noise <- rnorm(n, mean = 0, sd = noise_sd)
+  
+  # Multiplicative seasonality model
+  y <- (level + trend_component) * seasonal_component + noise
+  return(data.frame(time, y))
+}
+
+# Function to calculate rolling confidence intervals
+calculate_confidence_intervals <- function(y, window_size=5, level=0.95) {
+  n <- length(y)
+  z_value <- ifelse(level == 0.95, 1.96, 1.28)  # z-scores for 95% and 80% confidence
+  
+  lower_bound <- numeric(n)
+  upper_bound <- numeric(n)
+  
+  for (i in 1:n) {
+    # Define rolling window centered at point i
+    start_index <- max(1, i - floor(window_size / 2))
+    end_index <- min(n, i + floor(window_size / 2))
+    
+    # Extract the local window
+    window <- y[start_index:end_index]
+    
+    # Compute standard deviation and margin of error
+    std_dev <- sd(window, na.rm = TRUE)
+    margin_of_error <- z_value * std_dev / sqrt(length(window))
+    
+    # Compute the confidence interval bounds
+    lower_bound[i] <- y[i] - margin_of_error
+    upper_bound[i] <- y[i] + margin_of_error
+  }
+  
+  return(data.frame(upper_bound, lower_bound))
+}
+
+# Parameter grid
+trends <- c("NT", "UT", "DT")
+seasonalities <- c("NS", "S")
+noise_levels <- c("Low", "High")
+
+plots <- list()
+plot_num <- 1
+all_y_values <- c()
+
+for (noise in noise_levels) {
+  for (trend in trends) {
+    for (seasonality in seasonalities) {
+      for (replication in 1:2) {
+        df <- generate_series(trend, seasonality, noise)
+        
+        # Calculate rolling confidence intervals (80% and 95%)
+        conf_80 <- calculate_confidence_intervals(df$y, window_size=5, level=0.80)
+        conf_95 <- calculate_confidence_intervals(df$y, window_size=5, level=0.95)
+        
+        # Add confidence intervals to the data frame
+        df$lower_80 <- conf_80$lower_bound
+        df$upper_80 <- conf_80$upper_bound
+        df$lower_95 <- conf_95$lower_bound
+        df$upper_95 <- conf_95$upper_bound
+        
+        # Store all y-values for dynamic ylim calculation
+        all_y_values <- c(all_y_values, df$y, df$upper_80, df$lower_80, df$upper_95, df$lower_95)
+
+        # Create plot with confidence intervals as continuous shaded areas
+        p <- ggplot(df, aes(x=time, y=y)) +
+          geom_ribbon(aes(ymin=lower_95, ymax=upper_95), fill="red", alpha=0.2) +  # 95% CI
+          geom_ribbon(aes(ymin=lower_80, ymax=upper_80), fill="blue", alpha=0.3) +  # 80% CI
+          geom_line(color="black") +  # Actual series
+          geom_point(color="black", size=1) +  # Data points
+          ggtitle(paste(noise, "Noise |", trend, "|", ifelse(seasonality == "S", "Mul. Seas.", "No Seas."))) + 
+          theme_minimal() + 
+          theme(plot.title = element_text(size=8)) +
+          ylim(min(all_y_values, na.rm = TRUE), max(all_y_values, na.rm = TRUE))  # Dynamically adjusted y-axis
+        
+        plots[[plot_num]] <- p
+        plot_num <- plot_num + 1
+      }
+    }
+  }
+}
+
+# Arrange all plots in a grid
+grid.arrange(grobs = plots, ncol=4)
+```
+
+use this to display:
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+set.seed(123)
+
+# Function to generate time series
+generate_series <- function(trend, seasonality, noise_level, n=48) {
+  time <- 1:n
+  level <- 100
+  
+  # Trend component
+  if (trend == "UT") {  # Upward trend
+    trend_component <- 1.5 * time
+  } else if (trend == "DT") {  # Downward trend
+    trend_component <- -1.5 * time
+  } else {  # No trend
+    trend_component <- rep(0, n)
+  }
+  
+  # Sine wave seasonality component
+  if (seasonality == "S") {  # Multiplicative seasonality via sine wave
+    seasonal_component <- sin(2 * pi * time / 4) * 0.2 + 1
+  } else {  # No seasonality
+    seasonal_component <- rep(1, n)
+  }
+  
+  # Noise levels
+  noise_sd <- ifelse(noise_level == "Low", 8, 15)
+  noise <- rnorm(n, mean = 0, sd = noise_sd)
+  
+  # Multiplicative seasonality model
+  y <- (level + trend_component) * seasonal_component + noise
+  return(data.frame(time, y))
+}
+
+# Function to calculate rolling confidence intervals
+calculate_confidence_intervals <- function(y, window_size=5, level=0.95) {
+  n <- length(y)
+  z_value <- ifelse(level == 0.95, 1.96, 1.28)  # z-scores for 95% and 80% confidence
+  
+  lower_bound <- numeric(n)
+  upper_bound <- numeric(n)
+  
+  for (i in 1:n) {
+    start_index <- max(1, i - floor(window_size / 2))
+    end_index <- min(n, i + floor(window_size / 2))
+    
+    window <- y[start_index:end_index]
+    
+    std_dev <- sd(window, na.rm = TRUE)
+    margin_of_error <- z_value * std_dev
+    
+    lower_bound[i] <- y[i] - margin_of_error
+    upper_bound[i] <- y[i] + margin_of_error
+  }
+  
+  return(data.frame(upper_bound, lower_bound))
+}
+
+# Parameter grid
+trends <- c("NT", "UT", "DT")
+seasonalities <- c("NS", "S")
+noise_levels <- c("Low", "High")
+
+plots <- list()
+plot_num <- 1
+all_y_values <- c()  # Stores all y-values and confidence bounds
+
+for (noise in noise_levels) {
+  for (trend in trends) {
+    for (seasonality in seasonalities) {
+      for (replication in 1:2) {
+        df <- generate_series(trend, seasonality, noise)
+        
+        # Calculate rolling confidence intervals (80% and 95%)
+        conf_80 <- calculate_confidence_intervals(df$y, window_size=5, level=0.80)
+        conf_95 <- calculate_confidence_intervals(df$y, window_size=5, level=0.95)
+        
+        # Add confidence intervals to the data frame, ensuring no missing values
+        df$lower_80 <- ifelse(is.na(conf_80$lower_bound), df$y, conf_80$lower_bound)
+        df$upper_80 <- ifelse(is.na(conf_80$upper_bound), df$y, conf_80$upper_bound)
+        df$lower_95 <- ifelse(is.na(conf_95$lower_bound), df$y, conf_95$lower_bound)
+        df$upper_95 <- ifelse(is.na(conf_95$upper_bound), df$y, conf_95$upper_bound)
+
+        # Store all values for y-axis scaling
+        all_y_values <- c(all_y_values, df$y, df$upper_80, df$lower_80, df$upper_95, df$lower_95)
+
+        # Create plot with confidence intervals as continuous shaded areas
+        p <- ggplot(df, aes(x=time, y=y)) +
+          geom_ribbon(aes(ymin=lower_95, ymax=upper_95), fill="red", alpha=0.2) +  # 95% CI
+          geom_ribbon(aes(ymin=lower_80, ymax=upper_80), fill="blue", alpha=0.3) +  # 80% CI
+          geom_line(color="black") +  # Actual series
+          geom_point(color="black", size=1) +  # Data points
+          ggtitle(paste(noise, "Noise |", trend, "|", ifelse(seasonality == "S", "Mul. Seas.", "No Seas."))) + 
+          theme_minimal() + 
+          theme(plot.title = element_text(size=8)) +
+          ylim(range(all_y_values, na.rm = TRUE))  # Dynamically adjusted y-axis
+        
+        plots[[plot_num]] <- p
+        plot_num <- plot_num + 1
+      }
+    }
+  }
+}
+
+# Arrange all plots in a grid
+grid.arrange(grobs = plots, ncol=4)
+
+```
