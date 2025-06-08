@@ -321,6 +321,9 @@ class InteractiveForecast:
 
 
             elif triggered_id == 'save-button' and n_clicks: #adjust based on 19
+                if participant_info is None:#newly added
+                    return current_fig, "Participant info not loaded yet. Please refresh the page using your unique link.", dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
                 self.participant_id = participant_info["id"]
                 self.condition = participant_info["condition"]
                 self.series_index = participant_info["selected_series"][participant_info["series_counter"]]
