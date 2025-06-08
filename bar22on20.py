@@ -414,7 +414,11 @@ class InteractiveForecast:
 
     def save_data(self, user_intervals):
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        credentials = Credentials.from_service_account_file("your-credentials.json", scopes=scope)
+        import json
+        import os
+        credentials_info = json.loads(os.environ['FORCASTING_STUDY_JSON'])
+        credentials = Credentials.from_service_account_info(credentials_info, scopes=scope)
+
         client = gspread.authorize(credentials)
 
         sheet = client.open("Forecast_Results").sheet1  # first sheet
