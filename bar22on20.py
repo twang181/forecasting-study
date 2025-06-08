@@ -9,6 +9,14 @@ from dash import Dash, dcc, html, Input, Output, State, ctx
 import dash_bootstrap_components as dbc
 import urllib.parse #newly add
 
+
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+
+
+
+
 # Read the time-series data from the CSV file
 simulated_df = pd.read_csv('simulated_series_new.csv')
 forecast_df = pd.read_csv('forecast_table.csv')
@@ -409,11 +417,18 @@ class InteractiveForecast:
             return current_fig, "", user_intervals, click_buffer, dash.no_update, dash.no_update
 
     def save_data(self, user_intervals):
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_name('ba825132cde2ff4a8b6a86492c199744ea86ff21.json', scope)
+        client = gspread.authorize(creds)
+
+        sheet = client.open("Forecast_Results").sheet1  # first sheet
+
         forecast_results = []
 
         if self.condition == "control":
             for x_pos, interval in user_intervals.items():
-                forecast_results.append((x_pos, interval['lower'], interval['upper']))
+                forecast_results.append([self.participant_id, self.series_index, x_pos,
+                                         interval['lower'], interval['upper'], self.condition])
         else:
             for x_pos in self.forecast_x_positions:
                 row = self.forecasts[
@@ -424,14 +439,17 @@ class InteractiveForecast:
                     confidence_level = "95" if "95" in self.condition else "80"
                     lower = row[f"lower_{confidence_level}"].values[0]
                     upper = row[f"upper_{confidence_level}"].values[0]
-                    forecast_results.append((x_pos, lower, upper))
+                    forecast_results.append([self.participant_id, self.series_index, x_pos,
+                                             lower, upper, self.condition])
 
-        with open('forecast_results.csv', mode='a', newline='') as file:
-            writer = csv.writer(file)
-            if file.tell() == 0:
-                writer.writerow(["Participant_ID", "Series", "Period", "Lower", "Upper", "Condition"])
-            for period, lower, upper in forecast_results:
-                writer.writerow([self.participant_id, self.series_index, period, lower, upper, self.condition])
+        # ✅ Check if sheet is empty and add header only once
+        if not sheet.get_all_values():  # If the sheet is empty
+            header = ["participant_id", "series_index", "x_pos", "lower", "upper", "condition"]
+            sheet.append_row(header)
+
+        # Append forecast data
+        for row in forecast_results:
+            sheet.append_row(row)
 
     def switch_to_new_series(self):
         self.series_counter += 1
