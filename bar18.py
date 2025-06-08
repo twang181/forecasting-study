@@ -407,7 +407,10 @@ class InteractiveForecast:
         self.user_intervals = {}
 
     def run(self):
-        self.app.run(debug=True)
+        #self.app.run(debug=True)
+        import os
+        port = int(os.environ.get("PORT", 10000))  # 10000 fallback for local
+        self.app.run(host="0.0.0.0", port=port, debug=True)
 
 
 if __name__ == '__main__':
