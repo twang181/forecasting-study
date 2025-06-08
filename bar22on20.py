@@ -11,11 +11,7 @@ import urllib.parse #newly add
 
 
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-
-
-
-
+from google.oauth2.service_account import Credentials
 
 # Read the time-series data from the CSV file
 simulated_df = pd.read_csv('simulated_series_new.csv')
@@ -418,8 +414,8 @@ class InteractiveForecast:
 
     def save_data(self, user_intervals):
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name('ba825132cde2ff4a8b6a86492c199744ea86ff21.json', scope)
-        client = gspread.authorize(creds)
+        credentials = Credentials.from_service_account_file("your-credentials.json", scopes=scope)
+        client = gspread.authorize(credentials)
 
         sheet = client.open("Forecast_Results").sheet1  # first sheet
 
